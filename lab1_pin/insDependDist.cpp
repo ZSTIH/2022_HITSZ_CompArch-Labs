@@ -61,7 +61,7 @@ VOID updateInsDependDistance(VOID *v)
 	
 	// Update the lastInstructionCount for the written registers
 	for (vector<reg_t>::iterator it = regs->write.begin(); it != regs->write.end(); it++)
-		lastInsPointer[*it] = // TODO
+		lastInsPointer[*it] = insPointer; // TODO
 		
 	for (vector<reg_t>::iterator it = regs->read.begin(); it != regs->read.end(); it++)
 	{
@@ -70,11 +70,11 @@ VOID updateInsDependDistance(VOID *v)
 		if (lastInsPointer[reg] > 0)
 		{
 			// Compute the dependency distance
-			INT32 distance = // TODO
+			INT32 distance = insPointer - lastInsPointer[reg]; // TODO
 
 			// Populate the insDependDistance array
 			if (distance <= maxSize)
-				// TODO
+				insDependDistance[distance - 1]++; // TODO
 		}
 	}
 }
@@ -103,11 +103,13 @@ VOID Instruction(INS ins, VOID *v)
 	// Find all the registers read
 	for (uint32_t ir = 0; ir < INS_MaxNumRRegs(ins); ir++)
 	{
-		REG rr = /* TODO */
-
-		/*
-			TODO
-		*/
+		// TODO * 2
+		REG rr = INS_RegR(ins, ir);
+		rr = REG_FullRegName(rr);
+		if (!REG_valid(rr))
+			continue;
+		if (std::find(regs->read.begin(), regs->read.end(), rr) == regs->read.end())
+			regs->read.push_back(rr);
 	}
 
 	// Insert a call to the analysis function -- updateInsDependDistance -- before every instruction.
