@@ -125,11 +125,17 @@ class BHTPredictor: public BranchPredictor
         BOOL predict(ADDRINT addr)
         {
             // TODO: Produce prediction according to BHT
+            return m_scnt[truncate(addr, m_entries_log)].isTaken();
         }
 
         void update(BOOL takenActually, BOOL takenPredicted, ADDRINT addr)
         {
             // TODO: Update BHT according to branch results and prediction
+            if (takenActually) {
+                m_scnt[truncate(addr, m_entries_log)].increase();
+            } else {
+                m_scnt[truncate(addr, m_entries_log)].decrease();
+            }
         }
 };
 
@@ -152,40 +158,65 @@ class GlobalHistoryPredictor: public BranchPredictor
         GlobalHistoryPredictor(size_t ghr_width, size_t entry_num_log, size_t scnt_width = 2)
         {
             // TODO:
+            m_ghr = new ShiftReg(ghr_width);
+            m_entries_log = entry_num_log;
+
+            m_scnt = m_alloc.allocate(1 << entry_num_log);      // Allocate memory for PHT
+            for (int i = 0; i < (1 << entry_num_log); i++)
+                m_alloc.construct(m_scnt + i, scnt_width);      // Call constructor of SaturatingCnt
         }
 
         // Destructor
         ~GlobalHistoryPredictor()
         {
             // TODO
+            for (int i = 0; i < (1 << m_entries_log); i++)
+                m_alloc.destroy(m_scnt + i);
+
+            m_alloc.deallocate(m_scnt, 1 << m_entries_log);
         }
 
         // Only for TAGE: return a tag according to the specificed address
         UINT128 get_tag(ADDRINT addr)
         {
             // TODO
+            UINT128 hash_result = hash(addr, get_ghr());
+            return truncate(hash_result, m_entries_log);
         }
 
         // Only for TAGE: return GHR's value
         UINT128 get_ghr()
         {
             // TODO
+            return m_ghr->getVal();
         }
 
         // Only for TAGE: reset a saturating counter to default value (which is weak taken)
         void reset_ctr(ADDRINT addr)
         {
             // TODO
+            m_scnt[get_tag(addr)].reset();
         }
 
         bool predict(ADDRINT addr)
         {
             // TODO: Produce prediction according to GHR and PHT
+            return m_scnt[get_tag(addr)].isTaken();
         }
 
         void update(bool takenActually, bool takenPredicted, ADDRINT addr)
         {
             // TODO: Update GHR and PHT according to branch results and prediction
+            if (takenActually) {
+                m_scnt[get_tag(addr)].increase();
+            } else {
+                m_scnt[get_tag(addr)].decrease();
+            }
+            if (takenActually) {
+                m_ghr->shiftIn(1);
+            } else {
+                m_ghr->shiftIn(0);
+            }
         }
 };
 
@@ -201,14 +232,50 @@ class TournamentPredictor: public BranchPredictor
         TournamentPredictor(BranchPredictor* BP0, BranchPredictor* BP1, size_t gshr_width = 2)
         {
             // TODO
+            m_BPs[0] = BP0;
+            m_BPs[1] = BP1;
+            m_gshr = new SaturatingCnt(gshr_width);
         }
 
         ~TournamentPredictor()
         {
             // TODO
+            delete m_gshr;
+            delete m_BPs[0];
+            delete m_BPs[1];
         }
 
         // TODO
+
+        BOOL predict(ADDRINT addr)
+        {
+            if (m_gshr->isTaken()) {
+                return m_BPs[1]->predict(addr);
+            } else {
+                return m_BPs[0]->predict(addr);
+            }
+        }
+
+        void update(BOOL takenActually, BOOL takenPredicted, ADDRINT addr)
+        {
+            m_BPs[0]->update(takenActually, takenPredicted, addr);
+            m_BPs[1]->update(takenActually, takenPredicted, addr);
+            bool result0 = m_BPs[0]->predict(addr);
+            bool result1 = m_BPs[1]->predict(addr);
+            if (result0 == result1) {
+                // 两个预测器预测结果相同
+                return;
+            } else {
+                if (result0 == takenActually) {
+                    // 仅子预测器0预测正确
+                    m_gshr->decrease();
+                } else {
+                    // 仅子预测器1预测正确
+                    m_gshr->increase();
+                }
+            }
+        }
+
 };
 
 /* ===================================================================== */
@@ -222,6 +289,8 @@ class TAGEPredictor: public BranchPredictor
     BranchPredictor** m_T;          // 子预测器指针数组
     bool* m_T_pred;                 // 用于存储各子预测的预测值
     UINT8** m_useful;               // usefulness matrix
+    UINT128** m_tag;                // tag matrix
+    int m_tag_width;                // width of tag
     int provider_indx;              // Provider's index of m_T
     int altpred_indx;               // Alternate provider's index of m_T
 
@@ -237,14 +306,15 @@ class TAGEPredictor: public BranchPredictor
         //          Tn_entry_num_log:   各子预测器T[1 : m_tnum - 1]的PHT行数的对数
         //          scnt_width:         Width of saturating counter (3 by default)
         //          rst_period:         Reset period of usefulness
-        TAGEPredictor(size_t tnum, size_t T0_entry_num_log, size_t T1ghr_len, float alpha, size_t Tn_entry_num_log, size_t scnt_width = 3, size_t rst_period = 256*1024)
-        : m_tnum(tnum), m_entries_log(Tn_entry_num_log), m_rst_period(rst_period), m_rst_cnt(0)
+        TAGEPredictor(size_t tnum, size_t T0_entry_num_log, size_t T1ghr_len, float alpha, size_t Tn_entry_num_log, size_t scnt_width = 3, int tag_width = 3, size_t rst_period = 256*1024)
+        : m_tnum(tnum), m_entries_log(Tn_entry_num_log), m_tag_width(tag_width), m_rst_period(rst_period), m_rst_cnt(0)
         {
             m_T = new BranchPredictor* [m_tnum];
             m_T_pred = new bool [m_tnum];
             m_useful = new UINT8* [m_tnum];
+            m_tag = new UINT128* [m_tnum];
 
-            m_T[0] = new BHTPredictor(1 << T0_entry_num_log);
+            m_T[0] = new BHTPredictor(T0_entry_num_log);
 
             size_t ghr_size = T1ghr_len;
             for (size_t i = 1; i < m_tnum; i++)
@@ -253,7 +323,9 @@ class TAGEPredictor: public BranchPredictor
                 ghr_size = (size_t)(ghr_size * alpha);
 
                 m_useful[i] = new UINT8 [1 << m_entries_log];
+                m_tag[i] = new UINT128 [1 << m_entries_log];
                 memset(m_useful[i], 0, sizeof(UINT8)*(1 << m_entries_log));
+                memset(m_tag[i], 0, sizeof(UINT128)*(1 << m_entries_log));
             }
         }
 
@@ -270,17 +342,80 @@ class TAGEPredictor: public BranchPredictor
         bool predict(ADDRINT addr)
         {
             // TODO
+
+            for (size_t i = 0; i < m_tnum; i++) {
+                m_T_pred[i] = m_T[i]->predict(addr);
+            }
+
+            provider_indx = 0;
+            altpred_indx = 0;
+
+            for (size_t i = 1; i < m_tnum; i++) {
+                GlobalHistoryPredictor<hash1>* ghp = (GlobalHistoryPredictor<hash1>*) m_T[i];
+                UINT128 h2 = hash2(addr, ghp->get_ghr());
+                UINT128 tag = m_tag[i][ghp->get_tag(addr)];
+                h2 = truncate(h2, m_tag_width);
+                if (tag == h2) {
+                    altpred_indx = provider_indx;
+                    provider_indx = i;
+                }
+            }
+
+            return m_T_pred[provider_indx];
         }
 
         void update(bool takenActually, bool takenPredicted, ADDRINT addr)
         {
+            GlobalHistoryPredictor<hash1>* ghp = (GlobalHistoryPredictor<hash1>*) m_T[provider_indx];
+
             // TODO: Update provider itself
+            m_T[provider_indx]->update(takenActually, takenPredicted, addr);
+
 
             // TODO: Update usefulness
+            // 子预测器 T0 没有分配 m_useful 的内存, 需要跳过
+            if (m_T_pred[provider_indx] != m_T_pred[altpred_indx] && (provider_indx != 0)) {
+                int idx = ghp->get_tag(addr);
+                if (m_T_pred[provider_indx] == takenActually) {
+                    m_useful[provider_indx][idx]++;
+                } else {
+                    if (m_useful[provider_indx][idx] > 0) {
+                        m_useful[provider_indx][idx]--;
+                    }
+                }
+            }
 
             // TODO: Reset usefulness periodically
+            m_rst_cnt++;
+            if (m_rst_cnt == m_rst_period) {
+                for (size_t i = 1; i < m_tnum; i++)
+                {
+                    memset(m_useful[i], 0, sizeof(UINT8)*(1 << m_entries_log));
+                }
+                m_rst_cnt = 0;
+            }
 
             // TODO: Entry replacement
+            bool find = false;
+            for (size_t i = provider_indx + 1; i < m_tnum; i++) {
+                GlobalHistoryPredictor<hash1>* ghp_i = (GlobalHistoryPredictor<hash1>*) m_T[i];
+                UINT128 h2 = hash2(addr, ghp_i->get_ghr());
+                if (m_useful[i][ghp_i->get_tag(addr)] == 0) {
+                    m_tag[i][ghp_i->get_tag(addr)] = truncate(h2, m_tag_width);
+                    ghp_i->reset_ctr(addr);
+                    find = true;
+                }
+            }
+
+            if (find == false) {
+                for (size_t i = provider_indx + 1; i < m_tnum; i++)
+                {
+                    GlobalHistoryPredictor<hash1>* ghp_i = (GlobalHistoryPredictor<hash1>*) m_T[i];
+                    if (m_useful[i][ghp_i->get_tag(addr)] > 0) {
+                        m_useful[i][ghp_i->get_tag(addr)]--;
+                    }
+                }
+            }
         }
 };
 
@@ -367,7 +502,12 @@ INT32 Usage()
 int main(int argc, char * argv[])
 {
     // TODO: New your Predictor below.
-    // BP = new BranchPredictor();
+    BP = new BHTPredictor(15); // 基于 BHT 的分支预测
+    BP = new GlobalHistoryPredictor<f_xnor>(25, 15); // 基于全局历史的分支预测
+    BranchPredictor* BP0 = new GlobalHistoryPredictor<f_xor>(25, 15);
+    BranchPredictor* BP1 = new GlobalHistoryPredictor<f_xor1>(20, 15);
+    BP = new TournamentPredictor(BP0, BP1); // 锦标赛分支预测
+    BP = new TAGEPredictor<f_xnor, f_xor>(3, 12, 25, 5, 15, 2); // 基于 Tage 的分支预测
 
     // Initialize pin
     if (PIN_Init(argc, argv)) return Usage();
