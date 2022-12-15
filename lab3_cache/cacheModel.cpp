@@ -124,7 +124,7 @@ public:
     ~FullAssoCache() {}
 
 private:
-    UINT32 getTag(UINT32 addr) { /* TODO */ }
+    UINT32 getTag(UINT32 addr) { /* TODO */ return addr >> m_blksz_log; }
 
     // Look up the cache to decide whether the access is hit or missed
     bool lookup(UINT32 mem_addr, UINT32& blk_id)
@@ -132,6 +132,14 @@ private:
         UINT32 tag = getTag(mem_addr);
 
         // TODO
+        for (UINT32 i = 0; i < m_block_num; i++)
+        {
+            if ((m_tags[i] == tag) && (m_valids[i] == true))
+            {
+                blk_id = i;
+                return true;
+            }
+        }
 
         return false;
     }
@@ -147,10 +155,12 @@ private:
         }
 
         // Get the to-be-replaced block id using m_replace_q
-        UINT32 bid_2be_replaced = // TODO
+        UINT32 bid_2be_replaced = m_replace_q[0]; // TODO
 
         // Replace the cache block
         // TODO
+        m_tags[bid_2be_replaced] = getTag(mem_addr);
+        m_valids[bid_2be_replaced] = true;
         updateReplaceQ(bid_2be_replaced);
 
         return false;
@@ -160,6 +170,17 @@ private:
     void updateReplaceQ(UINT32 blk_id)
     {
         // TODO
+        for (UINT32 i = 0; i < m_block_num; i++)
+        {
+            if (m_replace_q[i] == blk_id)
+            {
+                for (UINT32 j = i + 1; j < m_block_num; j++)
+                {
+                    m_replace_q[j - 1] = m_replace_q[j];
+                }
+                m_replace_q[m_block_num - 1] = blk_id;
+            }
+        }
     }
 };
 
@@ -170,137 +191,230 @@ class SetAssoCache : public CacheModel
 {
 public:
     // Constructor
-    SetAssoCache(/* TODO */) {}
+    SetAssoCache(/* TODO */ UINT32 log_sets, UINT32 log_block_size, UINT32 asso)
+        : CacheModel((asso * (1 << log_sets)), log_block_size)
+    {
+        m_sets_log = log_sets;
+        m_asso = asso;
+    }
 
     // Destructor
     ~SetAssoCache() {}
 
-private:
+protected:
 
-    // 
+    // the log of the number of rows & the m_asso
+    UINT32 m_sets_log;
+    UINT32 m_asso;
+
+    // 获得当前主存地址的区内块号
+    virtual UINT32 getIndex(UINT32 addr) {
+        return (addr >> m_blksz_log) & ((1 << m_sets_log) - 1);
+    }
+
+    // 获得当前主存地址的区号
+    virtual UINT32 getTag(UINT32 addr) {
+        return (addr >> (m_blksz_log + m_sets_log));
+    }
 
     // Look up the cache to decide whether the access is hit or missed
     bool lookup(UINT32 mem_addr, UINT32& blk_id)
     {
         // TODO
+        UINT32 index = getIndex(mem_addr);
+        UINT32 tag = getTag(mem_addr);
+
+        for (UINT32 i = (index * m_asso); i < (index * m_asso + m_asso); i++)
+        {
+            if ((m_tags[i] == tag) && (m_valids[i] == true))
+            {
+                blk_id = i;
+                return true;
+            }
+        }
+
+        return false;
     }
 
     // Access the cache: update m_replace_q if hit, otherwise replace a block and update m_replace_q
     bool access(UINT32 mem_addr)
     {
         // TODO
+        UINT32 blk_id;
+
+        if (lookup(mem_addr, blk_id))
+        {
+            updateReplaceQ(blk_id);     // Update m_replace_q
+            return true;
+        }
+
+        // Get the to-be-replaced block id using m_replace_q
+        UINT32 bid_2be_replaced = getIndex(mem_addr) * m_asso;
+        for (UINT32 i = 0; i < m_block_num; i++)
+        {
+            if (m_replace_q[i] / m_asso == getIndex(mem_addr)) {
+                bid_2be_replaced = m_replace_q[i];
+                break;
+            }
+        }
+
+        // Replace the cache block
+        m_tags[bid_2be_replaced] = getTag(mem_addr);
+        m_valids[bid_2be_replaced] = true;
+        updateReplaceQ(bid_2be_replaced);
+
+        return false;
     }
 
     // Update m_replace_q
     void updateReplaceQ(UINT32 blk_id)
     {
         // TODO
+        for (UINT32 i = 0; i < m_block_num; i++)
+        {
+            if (m_replace_q[i] == blk_id)
+            {
+                for (UINT32 j = i + 1; j < m_block_num; j++)
+                {
+                    m_replace_q[j - 1] = m_replace_q[j];
+                }
+                m_replace_q[m_block_num - 1] = blk_id;
+                break;
+            }
+        }
     }
 };
 
 /**************************************
  * Set-Associative Cache Class (VIVT)
 **************************************/
-class SetAssoCache_VIVT : public CacheModel
+class SetAssoCache_VIVT : public SetAssoCache
 {
 public:
     // Constructor
-    SetAssoCache_VIVT(/* TODO */) {}
+    SetAssoCache_VIVT(/* TODO */ UINT32 log_sets, UINT32 log_block_size, UINT32 asso)
+        : SetAssoCache(log_sets, log_block_size, asso) {}
 
     // Destructor
     ~SetAssoCache_VIVT() {}
 
 private:
 
+    /* 直接继承 SetAssoCache 类的成员变量及方法, 无需重复实现 */
+
     // Add your members
 
-    // Look up the cache to decide whether the access is hit or missed
-    bool lookup(UINT32 mem_addr, UINT32& blk_id)
-    {
-        // TODO
-    }
+    // // Look up the cache to decide whether the access is hit or missed
+    // bool lookup(UINT32 mem_addr, UINT32& blk_id)
+    // {
+    //     // TODO
+    // }
 
-    // Access the cache: update m_replace_q if hit, otherwise replace a block and update m_replace_q
-    bool access(UINT32 mem_addr)
-    {
-        // TODO
-    }
+    // // Access the cache: update m_replace_q if hit, otherwise replace a block and update m_replace_q
+    // bool access(UINT32 mem_addr)
+    // {
+    //     // TODO
+    // }
 
-    // Update m_replace_q
-    void updateReplaceQ(UINT32 blk_id)
-    {
-        // TODO
-    }
+    // // Update m_replace_q
+    // void updateReplaceQ(UINT32 blk_id)
+    // {
+    //     // TODO
+    // }
 };
 
 /**************************************
  * Set-Associative Cache Class (PIPT)
 **************************************/
-class SetAssoCache_PIPT : public CacheModel
+class SetAssoCache_PIPT : public SetAssoCache
 {
 public:
     // Constructor
-    SetAssoCache_PIPT(/* TODO */) {}
+    SetAssoCache_PIPT(/* TODO */ UINT32 log_sets, UINT32 log_block_size, UINT32 asso)
+        : SetAssoCache(log_sets, log_block_size, asso) {}
 
     // Destructor
     ~SetAssoCache_PIPT() {}
 
 private:
 
+    /* 除了 getIndex 和 getTag 方法需要修改为根据物理地址来获取 index 和 tag, 其它成员变量和方法则是直接继承自 SetAssoCache 类, 无需重复实现 */
+
     // Add your members
 
-    // Look up the cache to decide whether the access is hit or missed
-    bool lookup(UINT32 mem_addr, UINT32& blk_id)
-    {
-        // TODO
+    // 获得当前主存地址的区内块号
+    UINT32 getIndex(UINT32 addr) {
+        UINT32 paddr = get_phy_addr(addr);
+        return (paddr >> m_blksz_log) & ((1 << m_sets_log) - 1);
     }
 
-    // Access the cache: update m_replace_q if hit, otherwise replace a block and update m_replace_q
-    bool access(UINT32 mem_addr)
-    {
-        // TODO
+    // 获得当前主存地址的区号
+    UINT32 getTag(UINT32 addr) {
+        UINT32 paddr = get_phy_addr(addr);
+        return (paddr >> (m_blksz_log + m_sets_log));
     }
 
-    // Update m_replace_q
-    void updateReplaceQ(UINT32 blk_id)
-    {
-        // TODO
-    }
+    // // Look up the cache to decide whether the access is hit or missed
+    // bool lookup(UINT32 mem_addr, UINT32& blk_id)
+    // {
+    //     // TODO
+    // }
+
+    // // Access the cache: update m_replace_q if hit, otherwise replace a block and update m_replace_q
+    // bool access(UINT32 mem_addr)
+    // {
+    //     // TODO
+    // }
+
+    // // Update m_replace_q
+    // void updateReplaceQ(UINT32 blk_id)
+    // {
+    //     // TODO
+    // }
 };
 
 /**************************************
  * Set-Associative Cache Class (VIPT)
 **************************************/
-class SetAssoCache_VIPT : public CacheModel
+class SetAssoCache_VIPT : public SetAssoCache
 {
 public:
     // Constructor
-    SetAssoCache_VIPT(/* TODO */) {}
+    SetAssoCache_VIPT(/* TODO */ UINT32 log_sets, UINT32 log_block_size, UINT32 asso)
+        : SetAssoCache(log_sets, log_block_size, asso) {}
 
     // Destructor
     ~SetAssoCache_VIPT() {}
 
 private:
 
+    /* 除了 getTag 方法需要修改为根据物理地址来获取 tag, 其它成员变量和方法则是直接继承自 SetAssoCache 类, 无需重复实现 */
+
     // Add your members
 
-    // Look up the cache to decide whether the access is hit or missed
-    bool lookup(UINT32 mem_addr, UINT32& blk_id)
-    {
-        // TODO
+    // 获得当前主存地址的区号
+    UINT32 getTag(UINT32 addr) {
+        UINT32 paddr = get_phy_addr(addr);
+        return (paddr >> (m_blksz_log + m_sets_log));
     }
 
-    // Access the cache: update m_replace_q if hit, otherwise replace a block and update m_replace_q
-    bool access(UINT32 mem_addr)
-    {
-        // TODO
-    }
+    // // Look up the cache to decide whether the access is hit or missed
+    // bool lookup(UINT32 mem_addr, UINT32& blk_id)
+    // {
+    //     // TODO
+    // }
 
-    // Update m_replace_q
-    void updateReplaceQ(UINT32 blk_id)
-    {
-        // TODO
-    }
+    // // Access the cache: update m_replace_q if hit, otherwise replace a block and update m_replace_q
+    // bool access(UINT32 mem_addr)
+    // {
+    //     // TODO
+    // }
+
+    // // Update m_replace_q
+    // void updateReplaceQ(UINT32 blk_id)
+    // {
+    //     // TODO
+    // }
 };
 
 CacheModel* my_fa_cache;
