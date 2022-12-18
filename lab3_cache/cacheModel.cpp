@@ -179,6 +179,7 @@ private:
                     m_replace_q[j - 1] = m_replace_q[j];
                 }
                 m_replace_q[m_block_num - 1] = blk_id;
+                break;
             }
         }
     }
