@@ -58,10 +58,6 @@ VOID updateInsDependDistance(VOID *v)
 				即对任意的r属于regs->write, 将当前PC值赋值给lastInsPointer[r].
 			思考: A和B哪个应该先执行? 请通过举例来说明理由.
 	*/
-	
-	// Update the lastInstructionCount for the written registers
-	for (vector<reg_t>::iterator it = regs->write.begin(); it != regs->write.end(); it++)
-		lastInsPointer[*it] = insPointer; // TODO
 		
 	for (vector<reg_t>::iterator it = regs->read.begin(); it != regs->read.end(); it++)
 	{
@@ -77,6 +73,10 @@ VOID updateInsDependDistance(VOID *v)
 				insDependDistance[distance - 1]++; // TODO
 		}
 	}
+	
+	// Update the lastInstructionCount for the written registers
+	for (vector<reg_t>::iterator it = regs->write.begin(); it != regs->write.end(); it++)
+		lastInsPointer[*it] = insPointer; // TODO
 }
 
 // Pin calls this function every time a new instruction is encountered
