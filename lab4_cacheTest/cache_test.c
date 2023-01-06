@@ -175,11 +175,12 @@ void Test_TLB_Size()
 		double time_used;
 		int test_tlb_entries = (1 << test_tlb_entries_log2);
 		int index = 0;
-		int step_width = test_tlb_entries * page_size;
+		int step_width = page_size;
+		int max_index = test_tlb_entries * page_size;
 		gettimeofday(&tp[0], NULL);
 		for (int i = 0; i < TEST_TIMES_2; i++)
 		{
-			index = (index + step_width) % L1_cache_size;
+			index = (index + step_width) % max_index;
 			array[index]++;
 		}
 		gettimeofday(&tp[1], NULL);
